@@ -1,0 +1,29 @@
+{
+  "name": "zktls-service",
+  "version": "1.0.0",
+  "description": "zkTLS HTTP API Service with Reclaim Protocol support for zkSEND",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "zktls",
+    "reclaim-protocol",
+    "zkproof",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "@reclaimprotocol/js-sdk": "^4.7.1",
+    "@reclaimprotocol/zk-fetch": "^0.8.0",
+    "dotenv": "^16.4.5",
+    "telegram": "^2.19.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
