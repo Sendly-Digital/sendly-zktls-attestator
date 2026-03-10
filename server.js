@@ -1,7 +1,7 @@
 /**
  * zkTLS HTTP API Service
  * 
- * HTTP API wrapper for the3cloud/zktls binary
+ * HTTP API wrapper for the3cloud/zktls CLI
  * 
  * Input JSON format is based on testdata/input.json from zktls repository
  */
@@ -22,7 +22,7 @@ const { StringSession } = require('telegram/sessions');
 const execAsync = promisify(exec);
 const app = express();
 const PORT = process.env.PORT || 3001;
-const ZKTLS_BINARY = process.env.ZKTLS_BINARY || process.env.ZKTLS_PATH || '/root/Sendly/zktls-service/zktls/target/release/zktls';
+const ZKTLS_PATH = process.env.ZKTLS_PATH || '/root/Sendly/zktls-service/zktls/target/release/zktls';
 // Default to r0 (Risc0) backend to avoid InvalidCertificate issue in SP1 with Twitter API
 // Can switch to sp1 via env: ZKTLS_BACKEND=sp1
 const ZKTLS_BACKEND = process.env.ZKTLS_BACKEND || 'r0';
@@ -242,14 +242,14 @@ app.get('/api/health', async (req, res) => {
       port: PORT,
     };
     
-    // Try to check zktls binary if configured (optional)
-    if (ZKTLS_BINARY && ZKTLS_BINARY !== '/root/Sendly/zktls-service/zktls/target/release/zktls') {
+    // Try to check zktls CLI if configured (optional)
+    if (ZKTLS_PATH && ZKTLS_PATH !== '/root/Sendly/zktls-service/zktls/target/release/zktls') {
       try {
-        const { stdout } = await execAsync(`${ZKTLS_BINARY} --version`, { timeout: 5000 });
+        const { stdout } = await execAsync(`${ZKTLS_PATH} --version`, { timeout: 5000 });
         health.zktls_version = stdout.trim();
         health.backend = ZKTLS_BACKEND;
       } catch (error) {
-        health.zktls_note = 'zktls binary not available (optional for Reclaim Protocol)';
+        health.zktls_note = 'zktls CLI is not available (optional for Reclaim Protocol)';
       }
     }
     
@@ -1536,8 +1536,8 @@ app.post('/api/proof/generate', requireAuth, async (req, res) => {
     console.log('[zkTLS] Input JSON:', JSON.stringify(inputData, null, 2));
 
     try {
-      console.log(`[zkTLS] Calling zktls binary: ${ZKTLS_BINARY}`);
-      const command = `${ZKTLS_BINARY} prove -i ${inputFile} -t evm -p ${ZKTLS_BACKEND}`;
+      console.log(`[zkTLS] Calling zktls CLI: ${ZKTLS_PATH}`);
+      const command = `${ZKTLS_PATH} prove -i ${inputFile} -t evm -p ${ZKTLS_BACKEND}`;
       console.log(`[zkTLS] Using backend: ${ZKTLS_BACKEND}`);
       console.log(`[zkTLS] Command: ${command}`);
       
