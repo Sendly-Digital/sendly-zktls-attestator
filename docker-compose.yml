@@ -8,8 +8,9 @@ services:
       dockerfile: Dockerfile
     container_name: zktls-attestator
     restart: unless-stopped
+    # Host 3002 -> container PORT (must match `environment.PORT`; app listens on that port inside the container)
     ports:
-      - "3002:3001"
+      - "3002:3002"
     env_file:
       - .env
     environment:
@@ -18,7 +19,7 @@ services:
     volumes:
       - ./logs:/home/appuser/app/logs
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3002/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
