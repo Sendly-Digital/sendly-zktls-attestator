@@ -140,19 +140,26 @@ const RECLAIM_PROVIDER_ID_GMAIL = process.env.RECLAIM_PROVIDER_ID_GMAIL;
 const RECLAIM_PROVIDER_ID_LINKEDIN = process.env.RECLAIM_PROVIDER_ID_LINKEDIN;
 const RECLAIM_PROVIDER_ID_GITHUB = process.env.RECLAIM_PROVIDER_ID_GITHUB;
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// CORS middleware
+// CORS must run before body parsers so OPTIONS preflight always gets ACAO / Allow-Headers.
+// Browsers send Access-Control-Request-Headers (e.g. baggage, sentry-trace); a fixed Allow-Headers
+// list fails preflight and surfaces as "No 'Access-Control-Allow-Origin'".
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key');
-  res.header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const requested = req.headers['access-control-request-headers'];
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    requested || 'Content-Type, Authorization, X-API-Key, Accept'
+  );
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return res.sendStatus(204);
   }
   next();
 });
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Simple API key authentication (optional)
 const requireAuth = (req, res, next) => {
