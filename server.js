@@ -52,8 +52,8 @@ const INSTAGRAM_CLIENT_SECRET = process.env.INSTAGRAM_CLIENT_SECRET;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 // LinkedIn OAuth (server-side code exchange)
-const LINKEDIN_CLIENT_ID = process.env.LINKEDIN_CLIENT_ID;
-const LINKEDIN_CLIENT_SECRET = process.env.LINKEDIN_CLIENT_SECRET;
+const LINKEDIN_CLIENT_ID = (process.env.LINKEDIN_CLIENT_ID || '').trim();
+const LINKEDIN_CLIENT_SECRET = (process.env.LINKEDIN_CLIENT_SECRET || '').trim();
 // Telegram Login Widget (hash verification + JWT for /api/telegram/me)
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 // Telegram MTProto (GramJS) for resolveUsername - get user by @username
@@ -857,7 +857,7 @@ app.post('/api/linkedin/oauth/exchange', noAuth, async (req, res) => {
     }
     const body = bodyParts.join('&');
 
-    const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+    let tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -865,7 +865,31 @@ app.post('/api/linkedin/oauth/exchange', noAuth, async (req, res) => {
       body,
     });
 
-    const bodyText = await tokenRes.text().catch(() => '');
+    let bodyText = await tokenRes.text().catch(() => '');
+    // RFC 6749: use either client_secret in body OR Basic auth, not both.
+    // Retry once with client_secret_basic (Basic header + body without secret) if LinkedIn returns invalid_client.
+    if (!tokenRes.ok && tokenRes.status === 401 && bodyText.includes('invalid_client')) {
+      const basicParts = [
+        'grant_type=authorization_code',
+        'code=' + encodeURIComponent(code),
+        'redirect_uri=' + encodeURIComponent(redirectUri),
+        'client_id=' + encodeURIComponent(LINKEDIN_CLIENT_ID),
+      ];
+      if (codeVerifier && typeof codeVerifier === 'string') {
+        basicParts.push('code_verifier=' + encodeURIComponent(codeVerifier));
+      }
+      const bodyBasicAuth = basicParts.join('&');
+      const basic = Buffer.from(`${LINKEDIN_CLIENT_ID}:${LINKEDIN_CLIENT_SECRET}`).toString('base64');
+      tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${basic}`,
+        },
+        body: bodyBasicAuth,
+      });
+      bodyText = await tokenRes.text().catch(() => '');
+    }
     if (!tokenRes.ok) {
       console.error('[LinkedIn OAuth] token exchange failed:', {
         status: tokenRes.status,
