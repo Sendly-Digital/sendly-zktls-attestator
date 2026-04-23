@@ -389,6 +389,60 @@ app.get('/api/reclaim/config', noAuth, async (req, res) => {
   }
 });
 
+function extractReclaimContextFromProofs(proofs) {
+  const proof0 = Array.isArray(proofs) ? proofs[0] : proofs;
+  const claimData = proof0?.claimData || proof0?.claim || proof0?.claimInfo || null;
+  const contextStr = claimData?.context || proof0?.context || null;
+
+  if (!contextStr) return null;
+  if (typeof contextStr !== 'string') return contextStr;
+
+  try {
+    return JSON.parse(contextStr);
+  } catch (_) {
+    return { raw: contextStr };
+  }
+}
+
+function getReclaimVerifyConfigFromProofs(proofs) {
+  const context = extractReclaimContextFromProofs(proofs);
+  const providerHash = context && typeof context === 'object' ? context.providerHash : null;
+  if (!providerHash || typeof providerHash !== 'string') return null;
+  return { hashes: [providerHash] };
+}
+
+async function verifyReclaimProofsWithSdk(proofs) {
+  const { verifyProof } = await import('@reclaimprotocol/js-sdk');
+  const config = getReclaimVerifyConfigFromProofs(proofs);
+
+  let verifyResult;
+  if (config) {
+    verifyResult = await verifyProof(proofs, config);
+  } else {
+    try {
+      verifyResult = await verifyProof(proofs);
+    } catch (error) {
+      const message = error?.message || '';
+      if (typeof message === 'string' && message.includes('Verification configuration is required')) {
+        throw new Error(
+          'Missing providerHash in proof context for Reclaim SDK v5 verification. Regenerate proof and retry.'
+        );
+      }
+      throw error;
+    }
+  }
+
+  const isValid =
+    typeof verifyResult === 'boolean'
+      ? verifyResult
+      : Boolean(verifyResult?.isVerified ?? verifyResult?.isValid);
+
+  return {
+    isValid,
+    context: extractReclaimContextFromProofs(proofs),
+  };
+}
+
 /**
  * Reclaim: verify proofs (server-side)
  * Docs: https://docs.reclaimprotocol.org/js-sdk/verifying-proofs
@@ -400,23 +454,7 @@ app.post('/api/reclaim/verify', noAuth, async (req, res) => {
       return res.status(400).json({ error: 'Missing body.proofs' });
     }
 
-    const { verifyProof } = await import('@reclaimprotocol/js-sdk');
-    const isValid = await verifyProof(proofs);
-
-    // Best-effort context extraction (structure varies by provider/SDK)
-    const proof0 = Array.isArray(proofs) ? proofs[0] : proofs;
-    const claimData = proof0?.claimData || proof0?.claim || proof0?.claimInfo || null;
-    const contextStr = claimData?.context || proof0?.context || null;
-
-    let context = null;
-    if (contextStr && typeof contextStr === 'string') {
-      try {
-        context = JSON.parse(contextStr);
-      } catch (_) {
-        context = { raw: contextStr };
-      }
-    }
-
+    const { isValid, context } = await verifyReclaimProofsWithSdk(proofs);
     return res.json({ isValid, context });
   } catch (error) {
     console.error('[Reclaim] verify failed:', error);
@@ -1441,10 +1479,9 @@ app.post('/api/reclaim/callback', noAuth, async (req, res) => {
         ? JSON.parse(body.proofs)
         : body?.proofs || body;
 
-    const { verifyProof } = await import('@reclaimprotocol/js-sdk');
-    const isValid = await verifyProof(proofs);
+    const { isValid, context } = await verifyReclaimProofsWithSdk(proofs);
 
-    return res.json({ ok: true, isValid });
+    return res.json({ ok: true, isValid, context });
   } catch (error) {
     console.error('[Reclaim] callback failed:', error);
     return res.status(400).json({ ok: false, error: error.message || 'Invalid callback payload' });
