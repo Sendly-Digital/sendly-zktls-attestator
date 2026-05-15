@@ -1,7 +1,7 @@
 {
-  "name": "zktls-service",
+  "name": "sendly-zktls-attestator",
   "version": "1.0.0",
-  "description": "zkTLS HTTP API Service with Reclaim Protocol support for zkSEND",
+  "description": "HTTP API for Reclaim verification, OAuth token exchange, and zkTLS proof generation",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
@@ -12,10 +12,16 @@
     "zktls",
     "reclaim-protocol",
     "zkproof",
+    "sendly",
+    "oauth",
     "api"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "Sendly Digital",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sendly-digital/sendly-zktls-attestator.git"
+  },
   "dependencies": {
     "@reclaimprotocol/js-sdk": "^5.2.0",
     "@reclaimprotocol/zk-fetch": "^0.8.0",

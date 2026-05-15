@@ -22,7 +22,13 @@ const { StringSession } = require('telegram/sessions');
 const execAsync = promisify(exec);
 const app = express();
 const PORT = process.env.PORT || 3001;
-const ZKTLS_PATH = process.env.ZKTLS_PATH || '/root/Sendly/zktls-service/zktls/target/release/zktls';
+const ZKTLS_PATH = process.env.ZKTLS_PATH || '/usr/local/bin/zktls';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const DEBUG = process.env.DEBUG === '1' || !IS_PRODUCTION;
+
+function debugLog(...args) {
+  if (DEBUG) console.log(...args);
+}
 // Default to r0 (Risc0) backend to avoid InvalidCertificate issue in SP1 with Twitter API
 // Can switch to sp1 via env: ZKTLS_BACKEND=sp1
 const ZKTLS_BACKEND = process.env.ZKTLS_BACKEND || 'r0';
@@ -129,11 +135,10 @@ function buildOAuth1Header({ method, url, consumerKey, consumerSecret, token, to
   return { header, oauthParams };
 }
 
-// Provider IDs (configure per env; twitter default from Reclaim Dev Tool)
-const RECLAIM_PROVIDER_ID_TWITTER =
-  process.env.RECLAIM_PROVIDER_ID_TWITTER || 'e6fe962d-8b4e-4ce5-abcc-3d21c88bd64a';
+// Provider IDs from Reclaim Dev Tool (set per platform in .env)
+const RECLAIM_PROVIDER_ID_TWITTER = process.env.RECLAIM_PROVIDER_ID_TWITTER;
 const RECLAIM_PROVIDER_ID_TELEGRAM = process.env.RECLAIM_PROVIDER_ID_TELEGRAM;
-const RECLAIM_PROVIDER_ID_TWITCH = process.env.RECLAIM_PROVIDER_ID_TWITCH || '6eefbc3f-9dd9-4466-a18f-ab9eea03d884'
+const RECLAIM_PROVIDER_ID_TWITCH = process.env.RECLAIM_PROVIDER_ID_TWITCH;
 const RECLAIM_PROVIDER_ID_INSTAGRAM = process.env.RECLAIM_PROVIDER_ID_INSTAGRAM;
 // const RECLAIM_PROVIDER_ID_TIKTOK = process.env.RECLAIM_PROVIDER_ID_TIKTOK;
 const RECLAIM_PROVIDER_ID_GMAIL = process.env.RECLAIM_PROVIDER_ID_GMAIL;
@@ -244,13 +249,12 @@ app.get('/api/health', async (req, res) => {
     const health = {
       status: 'healthy',
       version: '1.0.0',
-      service: 'zktls-service',
+      service: 'sendly-zktls-attestator',
       reclaim_configured: !!(RECLAIM_APP_ID && RECLAIM_APP_SECRET),
       port: PORT,
     };
     
-    // Try to check zktls CLI if configured (optional)
-    if (ZKTLS_PATH && ZKTLS_PATH !== '/root/Sendly/zktls-service/zktls/target/release/zktls') {
+    if (ZKTLS_PATH) {
       try {
         const { stdout } = await execAsync(`${ZKTLS_PATH} --version`, { timeout: 5000 });
         health.zktls_version = stdout.trim();
@@ -1509,7 +1513,7 @@ app.post('/api/proof/generate', requireAuth, async (req, res) => {
       });
     }
 
-    console.log(`[zkTLS] Generating proof for platform: ${platform}, URL: ${targetUrl}, backend: ${ZKTLS_BACKEND}`);
+    debugLog(`[zkTLS] Generating proof for platform: ${platform}, backend: ${ZKTLS_BACKEND}`);
 
     // Build RAW HTTP request with OAuth token
     const headers = {
@@ -1577,14 +1581,11 @@ app.post('/api/proof/generate', requireAuth, async (req, res) => {
     const inputFile = path.join(os.tmpdir(), `zktls_input_${crypto.randomUUID()}.json`);
     await fs.writeFile(inputFile, JSON.stringify(inputData, null, 2));
     
-    // Log created JSON for debugging
-    console.log('[zkTLS] Input JSON:', JSON.stringify(inputData, null, 2));
+    debugLog('[zkTLS] Input file:', inputFile);
 
     try {
-      console.log(`[zkTLS] Calling zktls CLI: ${ZKTLS_PATH}`);
       const command = `${ZKTLS_PATH} prove -i ${inputFile} -t evm -p ${ZKTLS_BACKEND}`;
-      console.log(`[zkTLS] Using backend: ${ZKTLS_BACKEND}`);
-      console.log(`[zkTLS] Command: ${command}`);
+      debugLog(`[zkTLS] Command: ${command}`);
       
       // Increase timeout to 10 minutes (600000 ms) for proof generation
       // Generation can take 5-10 minutes depending on complexity
@@ -1607,12 +1608,10 @@ app.post('/api/proof/generate', requireAuth, async (req, res) => {
         throw new Error(`Failed to parse zktls output: ${parseError.message}`);
       }
 
-      // Don't delete file on error for debugging
-      // await fs.unlink(inputFile).catch(() => {});
-      console.log(`[zkTLS] Input file preserved at: ${inputFile}`);
+      await fs.unlink(inputFile).catch(() => {});
 
       const duration = Date.now() - startTime;
-      console.log(`[zkTLS] Proof generated successfully in ${duration}ms`);
+      debugLog(`[zkTLS] Proof generated successfully in ${duration}ms`);
 
       // Return in format expected by frontend
       const response = {
@@ -1637,19 +1636,19 @@ app.post('/api/proof/generate', requireAuth, async (req, res) => {
 
       res.json(response);
     } catch (error) {
-      // Don't delete file on error for debugging
-      // await fs.unlink(inputFile).catch(() => {});
-      console.log(`[zkTLS] Input file preserved at: ${inputFile}`);
-      const duration = Date.now() - startTime;
-      console.error(`[zkTLS] Error generating proof (${duration}ms):`, error);
-      
-      // Log file content for debugging
-      try {
-        const fileContent = await fs.readFile(inputFile, 'utf8');
-        console.error('[zkTLS] Input file content:', fileContent);
-      } catch (readError) {
-        // Ignore read error
+      if (DEBUG) {
+        debugLog(`[zkTLS] Input file preserved at: ${inputFile}`);
+        try {
+          const fileContent = await fs.readFile(inputFile, 'utf8');
+          console.error('[zkTLS] Input file content:', fileContent);
+        } catch {
+          // ignore
+        }
+      } else {
+        await fs.unlink(inputFile).catch(() => {});
       }
+      const duration = Date.now() - startTime;
+      console.error(`[zkTLS] Error generating proof (${duration}ms):`, error.message);
       
       res.status(500).json({
         error: 'Failed to generate proof',
@@ -1676,4 +1675,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, '0.0.0.0');
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[sendly-zktls-attestator] listening on port ${PORT}`);
+});
