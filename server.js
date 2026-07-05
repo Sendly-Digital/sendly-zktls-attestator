@@ -328,6 +328,23 @@ function buildIdentity(platform, username) {
   return `${p}:${u}`;
 }
 
+/** Canonical Twitch raid identity: twitch:uid:{user_id} */
+function buildTwitchUidContextMessage(userId) {
+  const id = String(userId ?? '').trim();
+  if (!id) return '';
+  return `twitch:uid:${id}`;
+}
+
+function parseTwitchUserIdFromHelixBody(bodyText) {
+  try {
+    const json = JSON.parse(bodyText);
+    const id = json?.data?.[0]?.id;
+    return id != null ? String(id).trim() : '';
+  } catch (_) {
+    return '';
+  }
+}
+
 /**
  * Reclaim: build proof request config (server-side)
  * Docs: https://docs.reclaimprotocol.org/js-sdk/preparing-request
@@ -362,6 +379,7 @@ app.get('/api/reclaim/config', noAuth, async (req, res) => {
       providerId
     );
 
+    const normalizedPlatform = normalizePlatform(platform);
     const identity = buildIdentity(platform, username);
     if (!identity) {
       return res.status(400).json({ error: 'Missing required query params: platform and username' });
@@ -369,7 +387,11 @@ app.get('/api/reclaim/config', noAuth, async (req, res) => {
 
     // Context is returned in proof and helps correlate with zkSEND payment
     const contextAddress = recipient || 'anonymous';
-    const contextMessage = identity;
+    // Twitch uid payouts: pass username as uid:{id} so context is twitch:uid:{id}
+    const contextMessage =
+      normalizedPlatform === 'twitch' && String(username).trim().toLowerCase().startsWith('uid:')
+        ? buildTwitchUidContextMessage(String(username).trim().slice(4))
+        : identity;
     reclaimProofRequest.setContext(contextAddress, contextMessage);
 
     // Optional: redirect user after proof generation (useful for mobile QR flow)
@@ -1324,7 +1346,7 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
         : 'https://api.twitch.tv/helix/users';
 
     const allowedUrls = [effectiveRequestUrl];
-    const contextMessage = identity;
+    let contextMessage = identity;
 
     // Preflight check: verify tokens before invoking zkFetch
     try {
@@ -1385,6 +1407,14 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
             headers,
             body: body.slice(0, 1000),
           });
+        }
+        if (normalizedPlatform === 'twitch') {
+          const preflightBody = await preflightRes.text().catch(() => '');
+          const twitchUserId = parseTwitchUserIdFromHelixBody(preflightBody);
+          if (!twitchUserId) {
+            return res.status(401).json({ error: 'Twitch user id not found in Helix /users response' });
+          }
+          contextMessage = buildTwitchUidContextMessage(twitchUserId);
         }
       }
     } catch (preflightError) {
@@ -1454,6 +1484,8 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
                   ? useOAuth1
                     ? '"screen_name":"(?<username>[^"]+)"'
                     : '"username":"(?<username>[^"]+)"'
+                  : normalizedPlatform === 'twitch'
+                  ? '"id":"(?<userId>[^"]+)"'
                   : normalizedPlatform === 'telegram'
                   ? '"login":"(?<username>[^"]+)"'
                   : '"login":"(?<username>[^"]+)"',
