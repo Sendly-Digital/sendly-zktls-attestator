@@ -10,6 +10,11 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
+// attestor-core 5.x connects to Reclaim via WebSocket (global in Node 22+, polyfill for Node 20)
+if (typeof globalThis.WebSocket === 'undefined') {
+  globalThis.WebSocket = require('ws');
+}
+
 const express = require('express');
 const { exec } = require('child_process');
 const { promisify } = require('util');

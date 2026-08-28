@@ -13,7 +13,7 @@ RUN git clone https://github.com/the3cloud/zktls.git .
 RUN cargo build --release
  
 # Stage 2: Runtime environment 
-FROM node:20-slim AS runtime 
+FROM node:22-slim AS runtime 
  
 # Install system dependencies 
 RUN apt-get update && apt-get install -y build-essential python3 libgomp1 curl ca-certificates && rm -rf /var/lib/apt/lists/* 
