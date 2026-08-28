@@ -39,6 +39,14 @@ const RECLAIM_APP_ID = process.env.RECLAIM_APP_ID;
 const RECLAIM_APP_SECRET = process.env.RECLAIM_APP_SECRET;
 // Optional callback URL for server-to-server proof delivery
 const RECLAIM_APP_CALLBACK_URL = process.env.RECLAIM_APP_CALLBACK_URL; // e.g. https://your-domain.com/api/reclaim/callback
+const RECLAIM_ZKFETCH_USE_TEE = process.env.RECLAIM_ZKFETCH_USE_TEE === 'true';
+
+function defaultTwitterZkFetchUrl(useOAuth1) {
+  if (useOAuth1) {
+    return 'https://api.x.com/1.1/account/verify_credentials.json?skip_status=true';
+  }
+  return 'https://api.x.com/2/users/me';
+}
 
 // Twitter OAuth (server-side code exchange)
 const TWITTER_CLIENT_ID = process.env.TWITTER_CLIENT_ID;
@@ -1336,16 +1344,12 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
       typeof requestUrl === 'string' && requestUrl.length > 0
         ? requestUrl
         : normalizedPlatform === 'twitter'
-        ? useOAuth1
-          ? 'https://api.x.com/1.1/account/verify_credentials.json?include_email=false&skip_status=true'
-          : 'https://api.x.com/2/users/me?user.fields=username'
+        ? defaultTwitterZkFetchUrl(useOAuth1)
         : normalizedPlatform === 'github'
         ? 'https://api.github.com/user'
         : normalizedPlatform === 'telegram'
         ? `${req.protocol}://${req.get('host') || 'localhost'}/api/telegram/me`
         : 'https://api.twitch.tv/helix/users';
-
-    const allowedUrls = [effectiveRequestUrl];
     let contextMessage = identity;
 
     // Preflight check: verify tokens before invoking zkFetch
@@ -1424,15 +1428,9 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
       });
     }
 
-    const { generateSessionSignature, ReclaimClient } = await import('@reclaimprotocol/zk-fetch');
-    const signature = await generateSessionSignature({
-      applicationId: RECLAIM_APP_ID,
-      applicationSecret: RECLAIM_APP_SECRET,
-      allowedUrls,
-    });
-
-    const client = new ReclaimClient(RECLAIM_APP_ID, signature);
-    let requestHeaders = { accept: 'application/json' };
+    const { ReclaimClient } = await import('@reclaimprotocol/zk-fetch');
+    const client = new ReclaimClient(RECLAIM_APP_ID, RECLAIM_APP_SECRET);
+    let publicHeaders;
     let proofHeaders = {};
     if (normalizedPlatform === 'twitter') {
       if (useOAuth1) {
@@ -1449,8 +1447,7 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
         proofHeaders = { Authorization: `Bearer ${effectiveAccessToken}` };
       }
     } else if (normalizedPlatform === 'twitch') {
-      requestHeaders = {
-        ...requestHeaders,
+      publicHeaders = {
         'Client-Id': effectiveClientId,
       };
       proofHeaders = {
@@ -1467,7 +1464,8 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
       effectiveRequestUrl,
       {
         method: 'GET',
-        headers: requestHeaders,
+        ...(publicHeaders ? { headers: publicHeaders } : {}),
+        ...(RECLAIM_ZKFETCH_USE_TEE ? { useTee: true } : {}),
         context: {
           contextAddress: recipient,
           contextMessage,

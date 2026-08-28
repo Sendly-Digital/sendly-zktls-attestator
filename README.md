@@ -25,11 +25,11 @@ HTTP API service for Sendly Payments functionality that combines:
 ## API (main routes)
 
 ### Reclaim / zkFetch
-- `GET /api/reclaim/config` — builds proof request config for the selected platform and user.
-- `POST /api/reclaim/verify` — verifies the received proof.
-- `POST /api/reclaim/zkfetch/signature` — issues a session signature for zkFetch.
-- `POST /api/reclaim/zkfetch/prove` — backend zkFetch proof generation.
-- `POST /api/reclaim/callback` — endpoint for Reclaim server-to-server callbacks.
+- `GET /api/reclaim/config` - builds proof request config for the selected platform and user.
+- `POST /api/reclaim/verify` - verifies the received proof.
+- `POST /api/reclaim/zkfetch/signature` - issues a session signature for zkFetch.
+- `POST /api/reclaim/zkfetch/prove` - backend zkFetch proof generation.
+- `POST /api/reclaim/callback` - endpoint for Reclaim server-to-server callbacks.
 
 ### zkTLS
-- `POST /api/proof/generate` — runs `zktls prove` to generate a zkTLS proof.
+- `POST /api/proof/generate` - runs `zktls prove` to generate a zkTLS proof.
