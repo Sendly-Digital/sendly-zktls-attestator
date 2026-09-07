@@ -18,6 +18,11 @@ const os = require('os');
 const crypto = require('crypto');
 const { Api, TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
+const {
+  buildTwitchUidContextMessage,
+  parseTwitchHelixUser,
+  resolveTwitchContextMessage,
+} = require('./twitchContext');
 
 const execAsync = promisify(exec);
 const app = express();
@@ -326,23 +331,6 @@ function buildIdentity(platform, username) {
     return '';
   }
   return `${p}:${u}`;
-}
-
-/** Canonical Twitch raid identity: twitch:uid:{user_id} */
-function buildTwitchUidContextMessage(userId) {
-  const id = String(userId ?? '').trim();
-  if (!id) return '';
-  return `twitch:uid:${id}`;
-}
-
-function parseTwitchUserIdFromHelixBody(bodyText) {
-  try {
-    const json = JSON.parse(bodyText);
-    const id = json?.data?.[0]?.id;
-    return id != null ? String(id).trim() : '';
-  } catch (_) {
-    return '';
-  }
 }
 
 /**
@@ -1410,11 +1398,12 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
         }
         if (normalizedPlatform === 'twitch') {
           const preflightBody = await preflightRes.text().catch(() => '');
-          const twitchUserId = parseTwitchUserIdFromHelixBody(preflightBody);
-          if (!twitchUserId) {
-            return res.status(401).json({ error: 'Twitch user id not found in Helix /users response' });
+          const helixUser = parseTwitchHelixUser(preflightBody);
+          const resolved = resolveTwitchContextMessage(username, helixUser);
+          if (!resolved.ok) {
+            return res.status(401).json({ error: resolved.error });
           }
-          contextMessage = buildTwitchUidContextMessage(twitchUserId);
+          contextMessage = resolved.contextMessage;
         }
       }
     } catch (preflightError) {
