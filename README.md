@@ -15,7 +15,7 @@ HTTP API service for Sendly Payments functionality that combines:
 
 ## Technologies
 
-- Node.js 18+
+- Node.js 20+
 - Express 4
 - `@reclaimprotocol/js-sdk`
 - `@reclaimprotocol/zk-fetch`
