@@ -34,7 +34,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --only=production 
  
 # Copy application code 
-COPY server.js ./ 
+COPY server.js twitchContext.js ./ 
  
 # Change ownership to appuser 
 RUN chown -R appuser:appuser /home/appuser/app 

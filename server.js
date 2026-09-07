@@ -1333,7 +1333,6 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
         ? `${req.protocol}://${req.get('host') || 'localhost'}/api/telegram/me`
         : 'https://api.twitch.tv/helix/users';
 
-    const allowedUrls = [effectiveRequestUrl];
     let contextMessage = identity;
 
     // Preflight check: verify tokens before invoking zkFetch
@@ -1413,15 +1412,11 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
       });
     }
 
-    const { generateSessionSignature, ReclaimClient } = await import('@reclaimprotocol/zk-fetch');
-    const signature = await generateSessionSignature({
-      applicationId: RECLAIM_APP_ID,
-      applicationSecret: RECLAIM_APP_SECRET,
-      allowedUrls,
-    });
-
-    const client = new ReclaimClient(RECLAIM_APP_ID, signature);
-    let requestHeaders = { accept: 'application/json' };
+    // Public zkFetch headers must stay empty: Reclaim attestor requires the
+    // first two TLS headers to be Host and Connection. Accept / Client-Id in
+    // the public map triggers "Method/Host mismatch". Secrets go in proofHeaders.
+    const { ReclaimClient } = await import('@reclaimprotocol/zk-fetch');
+    const client = new ReclaimClient(RECLAIM_APP_ID, RECLAIM_APP_SECRET);
     let proofHeaders = {};
     if (normalizedPlatform === 'twitter') {
       if (useOAuth1) {
@@ -1438,10 +1433,6 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
         proofHeaders = { Authorization: `Bearer ${effectiveAccessToken}` };
       }
     } else if (normalizedPlatform === 'twitch') {
-      requestHeaders = {
-        ...requestHeaders,
-        'Client-Id': effectiveClientId,
-      };
       proofHeaders = {
         Authorization: `Bearer ${effectiveAccessToken}`,
         'Client-Id': effectiveClientId,
@@ -1456,7 +1447,6 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
       effectiveRequestUrl,
       {
         method: 'GET',
-        headers: requestHeaders,
         context: {
           contextAddress: recipient,
           contextMessage,
