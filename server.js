@@ -823,6 +823,48 @@ function normalizeTelegramUsername(raw) {
   return raw.trim().replace(/^@/, '').toLowerCase();
 }
 
+let telegramBotSession = '';
+let telegramBotClient = null;
+let telegramBotConnect = null;
+
+function telegramLookupConfigured() {
+  return Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_API_ID && TELEGRAM_API_HASH);
+}
+
+async function getTelegramBotClient() {
+  if (telegramBotClient && telegramBotClient.connected) {
+    return telegramBotClient;
+  }
+  if (telegramBotConnect) {
+    return telegramBotConnect;
+  }
+
+  telegramBotConnect = (async () => {
+    const client = new TelegramClient(
+      new StringSession(telegramBotSession),
+      TELEGRAM_API_ID,
+      TELEGRAM_API_HASH,
+      { connectionRetries: 3, useWSS: false }
+    );
+    await client.start({ botAuthToken: TELEGRAM_BOT_TOKEN });
+    const saved = client.session.save();
+    if (typeof saved === 'string' && saved) {
+      telegramBotSession = saved;
+    }
+    telegramBotClient = client;
+    return client;
+  })();
+
+  try {
+    return await telegramBotConnect;
+  } catch (err) {
+    telegramBotClient = null;
+    throw err;
+  } finally {
+    telegramBotConnect = null;
+  }
+}
+
 /**
  * GET /api/telegram/user?username=...
  * Resolve Telegram @username via MTProto (GramJS) and return { username, name, profile_image_url }.
@@ -836,52 +878,33 @@ app.get('/api/telegram/user', noAuth, async (req, res) => {
       return res.status(400).json({ error: 'Missing or invalid query.username', code: 'MISSING_USERNAME' });
     }
 
-    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_API_ID || !TELEGRAM_API_HASH) {
+    if (!telegramLookupConfigured()) {
       return res.status(503).json({
         error: 'Telegram user lookup is not configured. Set TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, TELEGRAM_API_HASH in .env',
         code: 'TELEGRAM_NOT_CONFIGURED',
       });
     }
 
-    const session = new StringSession('');
-    const client = new TelegramClient(session, TELEGRAM_API_ID, TELEGRAM_API_HASH, {
-      connectionRetries: 3,
-      useWSS: false,
-    });
+    const client = await getTelegramBotClient();
+    const result = await client.invoke(
+      new Api.contacts.ResolveUsername({ username })
+    );
 
-    await client.connect();
-    try {
-      await client.invoke(
-        new Api.auth.importBotAuthorization({
-          flags: 0,
-          apiId: TELEGRAM_API_ID,
-          apiHash: TELEGRAM_API_HASH,
-          botAuthToken: TELEGRAM_BOT_TOKEN,
-        })
-      );
-
-      const result = await client.invoke(
-        new Api.contacts.resolveUsername({ username })
-      );
-
-      const users = result.users || [];
-      const user = users.find((u) => u && typeof u.username === 'string' && u.username.toLowerCase() === username) || users[0];
-      if (!user || !user.username) {
-        return res.status(404).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
-      }
-
-      const firstName = (user.firstName && String(user.firstName).trim()) || '';
-      const lastName = (user.lastName && String(user.lastName).trim()) || '';
-      const name = [firstName, lastName].filter(Boolean).join(' ') || user.username;
-
-      return res.json({
-        username: user.username,
-        name,
-        profile_image_url: null,
-      });
-    } finally {
-      await client.disconnect();
+    const users = result.users || [];
+    const user = users.find((u) => u && typeof u.username === 'string' && u.username.toLowerCase() === username) || users[0];
+    if (!user || !user.username) {
+      return res.status(404).json({ error: 'User not found', code: 'USER_NOT_FOUND' });
     }
+
+    const firstName = (user.firstName && String(user.firstName).trim()) || '';
+    const lastName = (user.lastName && String(user.lastName).trim()) || '';
+    const name = [firstName, lastName].filter(Boolean).join(' ') || user.username;
+
+    return res.json({
+      username: user.username,
+      name,
+      profile_image_url: null,
+    });
   } catch (error) {
     const msg = error.message || '';
     if (msg.includes('USERNAME_NOT_OCCUPIED') || msg.includes('USERNAME_INVALID')) {
