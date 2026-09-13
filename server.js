@@ -83,6 +83,8 @@ const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
 // Telegram MTProto (GramJS) for resolveUsername - get user by @username
 const TELEGRAM_API_ID = parseInt(process.env.TELEGRAM_API_ID || '0', 10);
 const TELEGRAM_API_HASH = (process.env.TELEGRAM_API_HASH || '').trim();
+const TELEGRAM_SESSION = (process.env.TELEGRAM_SESSION || '').trim();
+const TELEGRAM_PHOTO_MAX_BYTES = 256 * 1024;
 
 const oauth1RequestSecrets = new Map();
 
@@ -823,52 +825,84 @@ function normalizeTelegramUsername(raw) {
   return raw.trim().replace(/^@/, '').toLowerCase();
 }
 
-let telegramBotSession = '';
-let telegramBotClient = null;
-let telegramBotConnect = null;
+let telegramSavedSession = TELEGRAM_SESSION;
+let telegramClient = null;
+let telegramConnect = null;
 
 function telegramLookupConfigured() {
-  return Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_API_ID && TELEGRAM_API_HASH);
+  return Boolean(TELEGRAM_API_ID && TELEGRAM_API_HASH && (TELEGRAM_SESSION || TELEGRAM_BOT_TOKEN));
 }
 
-async function getTelegramBotClient() {
-  if (telegramBotClient && telegramBotClient.connected) {
-    return telegramBotClient;
+function telegramPhotoContentType(buf) {
+  if (!buf || buf.length < 12) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+  if (buf[0] === 0x47 && buf[1] === 0x49) return 'image/gif';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[8] === 0x57) return 'image/webp';
+  return 'image/jpeg';
+}
+
+async function getTelegramClient() {
+  if (telegramClient && telegramClient.connected) {
+    return telegramClient;
   }
-  if (telegramBotConnect) {
-    return telegramBotConnect;
+  if (telegramConnect) {
+    return telegramConnect;
   }
 
-  telegramBotConnect = (async () => {
+  telegramConnect = (async () => {
     const client = new TelegramClient(
-      new StringSession(telegramBotSession),
+      new StringSession(telegramSavedSession),
       TELEGRAM_API_ID,
       TELEGRAM_API_HASH,
       { connectionRetries: 3, useWSS: false }
     );
-    await client.start({ botAuthToken: TELEGRAM_BOT_TOKEN });
+    if (TELEGRAM_SESSION) {
+      await client.connect();
+      const authorized = await client.checkAuthorization();
+      if (!authorized) {
+        throw new Error('TELEGRAM_SESSION is not authorized');
+      }
+    } else {
+      await client.start({ botAuthToken: TELEGRAM_BOT_TOKEN });
+    }
     const saved = client.session.save();
     if (typeof saved === 'string' && saved) {
-      telegramBotSession = saved;
+      telegramSavedSession = saved;
     }
-    telegramBotClient = client;
+    telegramClient = client;
     return client;
   })();
 
   try {
-    return await telegramBotConnect;
+    return await telegramConnect;
   } catch (err) {
-    telegramBotClient = null;
+    telegramClient = null;
     throw err;
   } finally {
-    telegramBotConnect = null;
+    telegramConnect = null;
+  }
+}
+
+async function downloadTelegramProfilePhoto(client, user) {
+  try {
+    const photo = await client.downloadProfilePhoto(user, { isBig: false });
+    if (!photo) return null;
+    const buf = Buffer.isBuffer(photo) ? photo : Buffer.from(photo);
+    if (!buf.length || buf.length > TELEGRAM_PHOTO_MAX_BYTES) return null;
+    return {
+      photo_base64: buf.toString('base64'),
+      photo_content_type: telegramPhotoContentType(buf),
+    };
+  } catch (err) {
+    console.warn('[Telegram] profile photo download skipped:', err && err.message ? err.message : err);
+    return null;
   }
 }
 
 /**
  * GET /api/telegram/user?username=...
- * Resolve Telegram @username via MTProto (GramJS) and return { username, name, profile_image_url }.
- * Used by zk-sender for preview; requires TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, TELEGRAM_API_HASH.
+ * Resolve Telegram @username via MTProto (GramJS) and return { username, name, photo_base64? }.
+ * Used by zk-sender for preview; requires TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_SESSION or TELEGRAM_BOT_TOKEN.
  */
 app.get('/api/telegram/user', noAuth, async (req, res) => {
   try {
@@ -880,12 +914,12 @@ app.get('/api/telegram/user', noAuth, async (req, res) => {
 
     if (!telegramLookupConfigured()) {
       return res.status(503).json({
-        error: 'Telegram user lookup is not configured. Set TELEGRAM_BOT_TOKEN, TELEGRAM_API_ID, TELEGRAM_API_HASH in .env',
+        error: 'Telegram user lookup is not configured. Set TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_SESSION or TELEGRAM_BOT_TOKEN in .env',
         code: 'TELEGRAM_NOT_CONFIGURED',
       });
     }
 
-    const client = await getTelegramBotClient();
+    const client = await getTelegramClient();
     const result = await client.invoke(
       new Api.contacts.ResolveUsername({ username })
     );
@@ -899,12 +933,18 @@ app.get('/api/telegram/user', noAuth, async (req, res) => {
     const firstName = (user.firstName && String(user.firstName).trim()) || '';
     const lastName = (user.lastName && String(user.lastName).trim()) || '';
     const name = [firstName, lastName].filter(Boolean).join(' ') || user.username;
+    const photo = await downloadTelegramProfilePhoto(client, user);
 
-    return res.json({
+    const body = {
       username: user.username,
       name,
       profile_image_url: null,
-    });
+    };
+    if (photo) {
+      body.photo_base64 = photo.photo_base64;
+      body.photo_content_type = photo.photo_content_type;
+    }
+    return res.json(body);
   } catch (error) {
     const msg = error.message || '';
     if (msg.includes('USERNAME_NOT_OCCUPIED') || msg.includes('USERNAME_INVALID')) {
