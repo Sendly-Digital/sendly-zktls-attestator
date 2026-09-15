@@ -1547,7 +1547,7 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
                   : normalizedPlatform === 'twitch'
                   ? '"id":"(?<userId>[^"]+)"'
                   : normalizedPlatform === 'gmail'
-                  ? '"email":"(?<username>[^"]+)"'
+                  ? '"email"\\s*:\\s*"(?<username>[^"]+)"'
                   : normalizedPlatform === 'telegram'
                   ? '"login":"(?<username>[^"]+)"'
                   : '"login":"(?<username>[^"]+)"',
