@@ -1388,6 +1388,10 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
       if (!effectiveAccessToken) {
         return res.status(401).json({ error: 'Missing GitHub OAuth access token' });
       }
+    } else if (normalizedPlatform === 'gmail') {
+      if (!effectiveAccessToken) {
+        return res.status(401).json({ error: 'Missing Gmail OAuth access token' });
+      }
     } else if (normalizedPlatform === 'telegram') {
       if (!effectiveAccessToken) {
         return res.status(401).json({ error: 'Missing Telegram JWT (connect Telegram first)' });
@@ -1403,6 +1407,8 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
         ? defaultTwitterZkFetchUrl(useOAuth1)
         : normalizedPlatform === 'github'
         ? 'https://api.github.com/user'
+        : normalizedPlatform === 'gmail'
+        ? 'https://www.googleapis.com/oauth2/v3/userinfo'
         : normalizedPlatform === 'telegram'
         ? `${req.protocol}://${req.get('host') || 'localhost'}/api/telegram/me`
         : 'https://api.twitch.tv/helix/users';
@@ -1440,7 +1446,7 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
         } else if (normalizedPlatform === 'twitch') {
           preflightHeaders.Authorization = `Bearer ${effectiveAccessToken}`;
           preflightHeaders['Client-Id'] = effectiveClientId;
-        } else if (normalizedPlatform === 'github') {
+        } else if (normalizedPlatform === 'github' || normalizedPlatform === 'gmail') {
           preflightHeaders.Authorization = `Bearer ${effectiveAccessToken}`;
         }
 
@@ -1511,7 +1517,7 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
         Authorization: `Bearer ${effectiveAccessToken}`,
         'Client-Id': effectiveClientId,
       };
-    } else if (normalizedPlatform === 'github') {
+    } else if (normalizedPlatform === 'github' || normalizedPlatform === 'gmail') {
       proofHeaders = { Authorization: `Bearer ${effectiveAccessToken}` };
     } else if (normalizedPlatform === 'telegram') {
       proofHeaders = { Authorization: `Bearer ${effectiveAccessToken}` };
@@ -1540,6 +1546,8 @@ app.post('/api/reclaim/zkfetch/prove', noAuth, async (req, res) => {
                     : '"username":"(?<username>[^"]+)"'
                   : normalizedPlatform === 'twitch'
                   ? '"id":"(?<userId>[^"]+)"'
+                  : normalizedPlatform === 'gmail'
+                  ? '"email":"(?<username>[^"]+)"'
                   : normalizedPlatform === 'telegram'
                   ? '"login":"(?<username>[^"]+)"'
                   : '"login":"(?<username>[^"]+)"',
